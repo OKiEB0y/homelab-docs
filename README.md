@@ -35,24 +35,24 @@ This lab simulates a small enterprise environment with a centralized SIEM, a hyp
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                     Home Network (192.168.1.0/24)           │
+│                     Home Network (RFC 1918 /24)             │
 │                                                             │
 │  ┌──────────────────┐          ┌─────────────────────────┐  │
-│  │   Kali Linux     │          │   Devin-PC              │  │
+│  │   Kali Linux     │          │   Windows Workstation   │  │
 │  │   (Attacker)     │          │   Windows 11 Pro        │  │
-│  │                  │          │   192.168.1.241          │  │
+│  │                  │          │   [HOST-2]              │  │
 │  └────────┬─────────┘          └──────────┬──────────────┘  │
 │           │  SSH / Pentest                │ Wazuh Agent 001  │
 │           │                               │                  │
 │  ┌────────▼───────────────────────────────▼──────────────┐  │
-│  │              laptopserver (192.168.1.89)               │  │
+│  │              [SIEM-HOST]                               │  │
 │  │              Ubuntu 24.04.4 LTS — Intel i7-10750H      │  │
 │  │              12 vCPUs │ 7.6 GB RAM │ 468 GB NVMe       │  │
 │  │                                                        │  │
 │  │  ┌─────────────────────────────────────────────────┐  │  │
 │  │  │           Wazuh 4.11.2 (All-in-One)             │  │  │
 │  │  │   wazuh-manager │ wazuh-indexer │ wazuh-dashboard│  │  │
-│  │  │   Agent 000: self (laptopserver)                │  │  │
+│  │  │   Agent 000: self ([SIEM-HOST])                 │  │  │
 │  │  └─────────────────────────────────────────────────┘  │  │
 │  │                                                        │  │
 │  │  ┌─────────────────────────────────────────────────┐  │  │
@@ -60,7 +60,7 @@ This lab simulates a small enterprise environment with a centralized SIEM, a hyp
 │  │  │                                                 │  │  │
 │  │  │   ┌──────────────────────────────────────────┐  │  │  │
 │  │  │   │  Kali Linux 2025.4 VM                    │  │  │  │
-│  │  │   │  172.16.126.128 (VMware NAT)              │  │  │  │
+│  │  │   │  [VMware NAT subnet]                     │  │  │  │
 │  │  │   │  BloodHound CE │ Impacket │ Neo4j         │  │  │  │
 │  │  │   └──────────────────────────────────────────┘  │  │  │
 │  │  └─────────────────────────────────────────────────┘  │  │
@@ -72,13 +72,11 @@ This lab simulates a small enterprise environment with a centralized SIEM, a hyp
 
 ## Infrastructure
 
-### Hypervisor Host — laptopserver
+### Hypervisor Host — [SIEM-HOST]
 
 | Component | Detail |
 |-----------|--------|
 | **OS** | Ubuntu 24.04.4 LTS (Noble) |
-| **Hostname** | laptopserver |
-| **IP** | 192.168.1.89 |
 | **CPU** | Intel Core i7-10750H (6 cores / 12 threads) |
 | **RAM** | 7.6 GB |
 | **Storage** | 468 GB NVMe |
@@ -135,7 +133,7 @@ Attempted to install `wazuh-agent` on the manager host for self-monitoring. Disc
 
 ### Dashboard Access
 
-- **URL:** `https://192.168.1.89`
+- **URL:** `https://[SIEM-HOST-IP]`
 - **Auth:** Username/password (auto-generated during install)
 - **TLS:** Self-signed certificate issued by internal Wazuh CA (see below)
 
@@ -161,7 +159,7 @@ openssl req -x509 -new -nodes -newkey rsa:2048 \
 # Generate CSR with SAN config
 openssl req -new -nodes -newkey rsa:2048 \
   -keyout dashboard-key.pem -out dashboard.csr \
-  -config dashboard.conf   # includes subjectAltName = IP:192.168.1.89
+  -config dashboard.conf   # includes subjectAltName = IP:[SIEM-HOST-IP]
 
 # Sign with internal CA
 openssl x509 -req -in dashboard.csr \
@@ -177,17 +175,11 @@ Key detail: the `-extensions v3_req` flag is required to embed the SAN into the 
 Exported the Wazuh root CA and distributed to client machines:
 
 ```bash
-scp okieb0y@192.168.1.89:/home/okieb0y/wazuh-root-ca.crt .
+scp [user]@[SIEM-HOST-IP]:/home/[user]/wazuh-root-ca.crt .
 ```
 
 **Windows (Chrome/Edge):** Imported via `certmgr.msc` → Trusted Root Certification Authorities
 **Firefox:** Imported via Settings → Privacy & Security → View Certificates → Authorities
-
-**CA Fingerprint (SHA-256):**
-```
-15:91:AC:E7:1E:09:4A:C4:18:05:DD:C8:5D:48:66:E5:
-A7:42:41:7D:52:1A:B8:1F:84:C8:7D:63:94:E5:56:42
-```
 
 ---
 
@@ -197,9 +189,9 @@ A7:42:41:7D:52:1A:B8:1F:84:C8:7D:63:94:E5:56:42
 
 | Detail | Value |
 |--------|-------|
-| **IP** | 172.16.126.128 (VMware NAT) |
-| **Access** | `ssh -J okieb0y@192.168.1.89 kali@172.16.126.128` |
-| **VMX** | `/home/okieb0y/VMs/kali-linux-2025.4-vmware-amd64.vmwarevm/` |
+| **Network** | VMware NAT (isolated subnet) |
+| **Access** | SSH via jump host on [SIEM-HOST] |
+| **Storage** | `/home/[user]/VMs/` on hypervisor |
 
 **Tooling installed:**
 
@@ -212,10 +204,10 @@ A7:42:41:7D:52:1A:B8:1F:84:C8:7D:63:94:E5:56:42
 | Neo4j | 4.4.26 | Graph database backend for BloodHound |
 | Evil-WinRM | 3.7 | WinRM shell for post-exploitation |
 
-**VM Management (from laptopserver):**
+**VM Management (headless CLI):**
 ```bash
-vmrun -T ws start ~/VMs/kali-linux-2025.4-vmware-amd64.vmwarevm/kali-linux-2025.4-vmware-amd64.vmx nogui
-vmrun -T ws stop  ~/VMs/kali-linux-2025.4-vmware-amd64.vmwarevm/kali-linux-2025.4-vmware-amd64.vmx
+vmrun -T ws start /path/to/vm.vmx nogui
+vmrun -T ws stop  /path/to/vm.vmx
 vmrun list
 ```
 
@@ -223,10 +215,10 @@ vmrun list
 
 ## Monitored Endpoints
 
-| Agent ID | Hostname | OS | IP | Status |
-|----------|----------|----|----|--------|
-| 000 | laptopserver | Ubuntu 24.04.4 LTS | 127.0.0.1 (local) | Active |
-| 001 | Devin-PC | Windows 11 Pro | 192.168.1.241 | Active |
+| Agent ID | OS | Type | Status |
+|----------|----|------|--------|
+| 000 | Ubuntu 24.04.4 LTS | SIEM Host (self) | Active |
+| 001 | Windows 11 Pro | Workstation | Active |
 
 ---
 
@@ -281,12 +273,12 @@ Without holding `wazuh-manager`, a future `apt upgrade` could resolve the packag
 ```
 homelab-docs/
 ├── README.md                          # This file
-└── walkthroughs/                      # Linked from /home/kali/linux_walkthroughs/
+└── walkthroughs/
     ├── services/
     │   ├── wazuh-install.md
     │   ├── vmware-workstation-setup.md
     │   ├── kali-vm-deploy.md
-    │   └── wazuh-agent-laptopserver.md
+    │   └── wazuh-agent-setup.md
     ├── security/
     │   └── wazuh-dashboard-tls.md
     └── package-management/
